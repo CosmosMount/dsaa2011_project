@@ -1,4 +1,11 @@
-def train_classification(X_train, y_train, method='rf', preprocessor=None, **kwargs):
+def train_classification(
+        X_train, 
+        y_train, 
+        method='rf', 
+        preprocessor=None,
+        use_smote=False, 
+        **kwargs
+    ):
     """
     Classification Methods
     """
@@ -13,6 +20,8 @@ def train_classification(X_train, y_train, method='rf', preprocessor=None, **kwa
         HistGradientBoostingClassifier
     )
     from sklearn.pipeline import Pipeline
+    from imblearn.pipeline import Pipeline as ImbPipeline
+    from imblearn.over_sampling import SMOTE
     from xgboost import XGBClassifier
     from lightgbm import LGBMClassifier
     from catboost import CatBoostClassifier
@@ -55,29 +64,35 @@ def train_classification(X_train, y_train, method='rf', preprocessor=None, **kwa
         model = AdaBoostClassifier(**params, **kwargs)
 
     elif method == 'xgboost':
-        model = XGBClassifier(
-            objective='multi:softprob',
-            num_class=3,
-            eval_metric='mlogloss',
-            random_state=42,
-            **kwargs
-        )
+        params = {
+            "objective": "multi:softprob",
+            "num_class": 3,
+            "eval_metric": "mlogloss",
+            "random_state": 42,
+        }
+        final_params = params.copy()
+        final_params.update(kwargs)
+        model = XGBClassifier(**final_params)
 
     elif method == 'lightgbm':
-        model = LGBMClassifier(
-            objective='multiclass',
-            num_class=3,
-            random_state=42,
-            **kwargs
-        )
+        params = {
+            "objective": "multiclass",
+            "num_class": 3,
+            "random_state": 42
+        }
+        final_params = params.copy()
+        final_params.update(kwargs)
+        model = LGBMClassifier(**final_params)
 
     elif method == 'catboost':
-        model = CatBoostClassifier(
-            loss_function='MultiClass',
-            verbose=0,
-            random_state=42,
-            **kwargs
-        )
+        params = {
+            "loss_function": "MultiClass",
+            "verbose": 0,
+            "random_state": 42
+        }
+        final_params = params.copy()
+        final_params.update(kwargs)
+        model = CatBoostClassifier(**final_params)
     
     elif method == 'extra_trees':
         params = {
@@ -88,7 +103,9 @@ def train_classification(X_train, y_train, method='rf', preprocessor=None, **kwa
             "random_state": 42,
             "n_jobs": -1
         }
-        model = ExtraTreesClassifier(**params, **kwargs)
+        final_params = params.copy()
+        final_params.update(kwargs)
+        model = ExtraTreesClassifier(**final_params)
     
     elif method == 'hist_gradient_boosting':
         params = {
@@ -98,21 +115,27 @@ def train_classification(X_train, y_train, method='rf', preprocessor=None, **kwa
             "l2_regularization": 1.0,
             "random_state": 42
         }
-        model = HistGradientBoostingClassifier(**params, **kwargs)
+        final_params = params.copy()
+        final_params.update(kwargs)
+
+        model = HistGradientBoostingClassifier(**final_params)
 
     else:
         raise ValueError(f"Unexpected Method: {method}")
 
+    steps = []
+
     if preprocessor is not None:
-        pipeline = Pipeline([
-            ('preprocessor', preprocessor),
-            ('model', model)
-        ])
-        pipeline.fit(X_train, y_train)
-        return pipeline
+        steps.append(('preprocessor', preprocessor))
+
+    if use_smote:
+        steps.append(('smote', SMOTE(random_state=42)))
+        pipeline = ImbPipeline(steps + [('model', model)])
     else:
-        model.fit(X_train, y_train)
-        return model
+        pipeline = Pipeline(steps + [('model', model)])
+
+    pipeline.fit(X_train, y_train)
+    return pipeline
     
 def perform_clustering(X, method='kmeans', n_clusters=3, **kwargs):
     from sklearn.mixture import GaussianMixture
@@ -185,8 +208,9 @@ def _train_eval(
     preprocessor,
     method,
     use_cv=False,
+    use_smote=False,
     cv=5,
-    scoring='f1_macro'
+    scoring='f1_macro',
 ):
 
     model = train_classification(
@@ -194,6 +218,7 @@ def _train_eval(
         y_train,
         preprocessor=preprocessor,
         method=method,
+        use_smote=use_smote,
         **params
     )
 
@@ -227,6 +252,7 @@ def grid_search_classification(
     param_grid=None,
     n_jobs=-1,
     use_cv=False,
+    use_smote=False,
     cv=5
 ):
 
@@ -238,6 +264,7 @@ def grid_search_classification(
             preprocessor,
             method,
             use_cv,
+            use_smote,
             cv
         )
         for params in ParameterGrid(param_grid)
@@ -260,3 +287,30 @@ def grid_search_classification(
         best_model.fit(X_train, y_train)
 
     return best_model, best_params, best_score
+
+def train_ensemble_voting(
+    X_train, y_train,
+    methods,
+    preprocessor=None,
+    voting='soft'
+):
+    from sklearn.ensemble import VotingClassifier
+    models = []
+
+    for m in methods:
+        model = train_classification(
+            X_train,
+            y_train,
+            method=m,
+            preprocessor=preprocessor
+        )
+        models.append((m, model))
+
+    ensemble = VotingClassifier(
+        estimators=models,
+        voting=voting,
+        n_jobs=-1
+    )
+
+    ensemble.fit(X_train, y_train)
+    return ensemble
