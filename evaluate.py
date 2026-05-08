@@ -1,6 +1,16 @@
 import pandas as pd
 import numpy as np
 
+def _safe_class_key(label):
+    label = str(label)
+    return (
+        label.replace(" ", "_")
+        .replace("/", "_")
+        .replace("\\", "_")
+        .replace("-", "_")
+    )
+
+
 def evaluate_classification(model, X_test, y_test):
     from sklearn.metrics import (
         accuracy_score, precision_score, recall_score,
@@ -19,6 +29,11 @@ def evaluate_classification(model, X_test, y_test):
         'f1': f1_score(y_test, y_pred, average=avg),
         'confusion_matrix': confusion_matrix(y_test, y_pred)
     }
+
+    # Per-class F1 for multi-class reporting
+    per_class_f1 = f1_score(y_test, y_pred, average=None, labels=classes, zero_division=0)
+    for label, score in zip(classes, per_class_f1):
+        results[f"f1_{_safe_class_key(label)}"] = score
 
     if hasattr(model, "predict_proba"):
         y_proba = model.predict_proba(X_test)
